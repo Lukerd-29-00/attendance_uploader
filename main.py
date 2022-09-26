@@ -9,7 +9,6 @@ import json
 BASE = "https://udel.instructure.com/api/v1" #The base URL for canvas.
 
 COURSE = 1671413 #You can get this from the URL bar anywhere in the 220 canvas page.
-ASSIGNMENT = 10570458 #you can get the assignment ID from the URL bar in speedgrader.
 
 ATTENDANCE_PATH="input/032.xlsx" #The path to the workbook containing attendance information (see above). 
 ATTENDANCE_SHEET = "test" #The name of the worksheet inside the ATTENDANCE_PATH workbook (see above).
@@ -96,6 +95,7 @@ def create_name(raw: str)->Name:
         match = re.search(r"([a-zA-Z-']+)\s*,\s*([a-zA-Z-']+)",raw)
         return Name(match.group(2),match.group(1))
 
+
 def get_ids(filename: str)->typing.Dict[Name,int]:
     """Extracts the canvas ID's from a worksheet. Ignores the first row
 
@@ -118,7 +118,6 @@ def get_ids(filename: str)->typing.Dict[Name,int]:
     ids.close()
     return idsmap
 
-
 async def update_attendance(sheet: openpyxl.worksheet._read_only.ReadOnlyWorksheet,ids: typing.Dict[Name,int])->None:
     """Asynchronously sets the grades of the students in the provided worksheet via the Canvas REST API.
 
@@ -128,41 +127,58 @@ async def update_attendance(sheet: openpyxl.worksheet._read_only.ReadOnlyWorkshe
         ids:
             A dictionary mapping the names of the students in sheet to their canvas IDs.
     """
-    url = f"{BASE}/courses/{COURSE}/assignments/{ASSIGNMENT}/submissions"
+    url = f"{BASE}/courses/{COURSE}/assignments"
     header = True
-    token = ""
     with open(AUTH_PATH,"r") as f:
         token = f.read().strip()
-    async with aiohttp.ClientSession() as session:
-        for row in sheet:
-            if header:
-                header = False
-                continue
-            student_id = ids[create_name(row[1].value)]
-            present: str = row[2].value.strip().lower()
-            grade = 0
-            if present == "present" or present == "yes":
-                grade = 5
-            elif present == "absent" or present == "no":
-                grade = 0
-            else:
-                raise ValueError(f"Inappropriate entry {present} in entry for {create_name(row[0].value)}")
-            body={
-                "submission": {
-                    "assignment_id":ASSIGNMENT,
-                    "posted_grade":grade,
-                    "user_id":student_id,
-                    "submission_type": None
-                }
-            }
-            headers = {
+    assignmentIds = {}
+    columns = {}
+    datePattern = re.compile(r"[lL]ab\s*[aA]ttendance\s*([0-9]+\/[0-9]+)")
+    headers = {
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "Authorization": f"Bearer {token}"
-            }
-            async with session.put(f"{url}/{student_id}",data=json.dumps(body),headers=headers) as res:
-                if not res.ok:
-                    raise ValueError(await res.text())
+    }
+    async with aiohttp.ClientSession() as session:
+        assignments = await session.get(f"{BASE}/courses/{COURSE}/assignments",headers=headers)
+        stream = assignments.content
+        data = (await stream.readuntil(b"},{"))[1:]
+        while data:
+            if data[-1] == 93:
+                data = data[:-1]
+            assignment = json.loads(data.decode("utf-8"))
+            match = re.search(datePattern,assignment["name"])
+            if match:
+                assignmentIds[match.group(1)] = assignment["id"]
+            data = (await stream.readuntil(b"},{"))[1:]
+        for row in sheet:
+            if header:
+                header = False
+                for i in range(2,len(row)):
+                    date = re.search(r"([0-9]{1,2}\/[0-9]{1,2})",row[i].value.strip())
+                    if date:
+                        columns[i] = assignmentIds[date.group(1)]
+                continue
+            student_id = ids[create_name(row[1].value)]
+            for i in range(2,len(row)):
+                present = row[i].value
+                if present == "present" or present == "yes":
+                    grade = 5
+                elif present == "absent" or present == "no":
+                    grade = 0
+                else:
+                    raise ValueError(f"Inappropriate entry {present} in entry for {create_name(row[0].value)}")
+                body={
+                    "submission": {
+                        "assignment_id":columns[i],
+                        "posted_grade":grade,
+                        "user_id":student_id,
+                        "submission_type": None
+                    }
+                }
+                async with session.put(f"{url}/{columns[i]}/submissions/{student_id}",data=json.dumps(body),headers=headers) as res:
+                    if not res.ok:
+                        raise ValueError(await res.text())
 
 async def main():
     """Gets the IDs from the appropriate sheet, reads the attendance sheet, and marks the students as present or absent appropriately."""
