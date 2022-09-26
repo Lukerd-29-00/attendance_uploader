@@ -1,11 +1,3 @@
-"""A program that uses data from an excel spreadsheet to automatically upload the students' attendance into canvas.
-
-Usage: First, write your spreadsheet and save it in xlsx format. The students' names should be in the second column, 
-and whether or not they are present should be in the third. The first column is ignored. Save this in an xlsx sheet. Export the gradebook from canvas and copy the first two columns
-into another sheet and save it in xlsx format to get the students' ids. Finally, create an OAuth2 token. Modify the globals below appropriately and run the program.
-
-Note that the program opens all workbooks in read only mode, which means that it does not matter if you have them open in another program.
-"""
 import re
 import openpyxl
 import typing
@@ -24,6 +16,7 @@ ATTENDANCE_SHEET = "test" #The name of the worksheet inside the ATTENDANCE_PATH 
 
 IDS_PATH = "input/ids.xlsx" #The path to the student canvas IDs (see above).
 IDS_SHEET = "Sheet1" #The name of the sheet containing the canvas IDs in the IDS_PATH workbook (see above).
+
 AUTH_PATH = "input/attendance_upload_token.txt" #The path to your Canvas OAuth2 token (see above).
 
 class Name(object):
